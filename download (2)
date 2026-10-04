@@ -1,0 +1,12 @@
+.env
+*.db
+*.db-shm
+*.db-wal
+backup_*.db
+__pycache__/
+*.py[cod]
+.git/
+.venv/
+venv/
+.vscode/
+.idea/

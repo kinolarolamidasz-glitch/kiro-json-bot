@@ -54,3 +54,7 @@ For mandatory subscription, configure the official channel ID/link and make the 
 - Multi-channel/group mandatory subscription
 - Payment-channel masked user names
 - Interface guide: `../INTERFACE_GUIDE.md`
+
+
+## Railway
+Set `BOT_TOKEN` and `ADMIN_IDS` in Railway Variables. Do not upload `.env`. The bot runs with `python bot.py`. For SQLite persistence, attach a Railway Volume and ensure the app directory is persisted as needed.
