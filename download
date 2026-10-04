@@ -1,11 +1,7 @@
 .env
-*.db
-*.db-shm
-*.db-wal
-backup_*.db
-__pycache__/
-*.py[cod]
 .venv/
 venv/
-.vscode/
-.idea/
+__pycache__/
+*.pyc
+*.db
+*.db-*

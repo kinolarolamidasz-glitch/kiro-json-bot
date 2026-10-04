@@ -7,8 +7,15 @@ from aiogram.types import BotCommand, Message, InlineKeyboardMarkup, InlineKeybo
 from config import load_config, Config
 from database import Database
 from keyboards import main_menu
-from services.membership_service import check_memberships, chat_link
-from handlers import start, user, json_market, withdrawals, admin, cards, json_service_order, topups
+from membership_service import check_memberships, chat_link
+import handler_start as start
+import handler_user as user
+import handler_json_market as json_market
+import handler_withdrawals as withdrawals
+import handler_admin as admin
+import handler_cards as cards
+import handler_json_service_order as json_service_order
+import handler_topups as topups
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
