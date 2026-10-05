@@ -22,18 +22,22 @@ async def start(m: Message, state: FSMContext, db: Database):
         'Avval ma’lumot qaysi manbadan ekanini tanlang:',
         parse_mode='HTML', reply_markup=json_source_menu())
 
-@router.callback_query(JsonServiceStates.waiting_source, F.data.startswith('jssource:'))
+@router.callback_query(F.data.startswith('jssource:'))
 async def choose_source(c: CallbackQuery, state: FSMContext):
-    source = c.data.split(':', 1)[1].strip()
+    raw = c.data.split(':', 1)[1].strip().lower()
+    source_map = {'github': 'GitHub', 'google': 'Google', 'builder_id': 'Builder ID'}
+    source = source_map.get(raw)
+    if not source:
+        return await c.answer('Noma’lum manba', show_alert=True)
     await state.update_data(source=source)
     await state.set_state(JsonServiceStates.waiting_request)
+    await c.answer('✅ Tanlandi')
     await c.message.answer(
         f'✅ Manba: <b>{escape(source)}</b>\n\n'
         '📋 Endi JSONga aylantirilishi kerak bo‘lgan <b>ma’lumotlarni oddiy TEXT</b> qilib yuboring.\n'
         'Masalan: nomi, ID, link, parametrlar va kerakli boshqa ma’lumotlar.\n\n'
         '/cancel — bekor qilish.',
         parse_mode='HTML', reply_markup=cancel_inline())
-    await c.answer()
 
 @router.message(JsonServiceStates.waiting_source, F.text)
 async def source_required(m: Message):
@@ -70,13 +74,69 @@ async def receive_request(m: Message, state: FSMContext, db: Database, config: C
         f'👤 Foydalanuvchi: <b>{escape(order["full_name"])}</b>\n'
         f'🔗 {escape(uname)}\n🆔 <code>{order["telegram_user_id"]}</code>\n'
         f'🌐 <b>Manba:</b> {escape(source)}\n💰 Narx: <b>{format_money(order["price"])}</b>\n'
-        f'🕐 {escape(order["created_at"])}\n\n📋 <b>Ma’lumot:</b>\n<pre>{escape(order["request_text"])}</pre>')
+        f'🕐 {escape(order["created_at"])}\n\n📋 <b>Ma’lumot:</b>\n<pre>{escape(order["request_text"][:2300])}</pre>')
+    for aid in config.admin_ids:
+        try:
+            await m.bot.send_message(aid, admin_text, parse_mode='HTML', reply_markup=json_service_admin_actions(oid))
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception('Admin notification failed')
+
+@router.callback_query(F.data == 'jsnoop:')
+async def noop(c: CallbackQuery):
+    await c.answer()
+
+
+@router.message(JsonServiceStates.waiting_request, F.document)
+async def receive_request_document(m: Message, state: FSMContext, db: Database, config: Config):
+    doc = m.document
+    name = (doc.file_name or '').lower()
+    if not (name.endswith('.txt') or name.endswith('.json')):
+        return await m.answer('❌ Oddiy TEXT yuboring yoki .txt/.json hujjat yuboring.')
+    if doc.file_size and doc.file_size > 50000:
+        return await m.answer('❌ Fayl juda katta. Maksimum 50 KB.')
+    try:
+        from io import BytesIO
+        tg_file = await m.bot.get_file(doc.file_id)
+        buf = BytesIO()
+        await m.bot.download_file(tg_file.file_path, destination=buf)
+        text = buf.getvalue().decode('utf-8-sig').strip()
+    except UnicodeDecodeError:
+        return await m.answer('❌ Fayl UTF-8 formatida bo‘lishi kerak.')
+    except Exception:
+        return await m.answer('❌ Faylni o‘qib bo‘lmadi. Qaytadan yuboring.')
+    if len(text) < 3:
+        return await m.answer('❌ Kerakli ma’lumotlar juda qisqa.')
+    u = db.user(m.from_user.id)
+    price = db.json_service_price()
+    if not u or u['balance'] < price:
+        await state.clear()
+        return await m.answer(f'❌ Balansingiz yetarli emas. Kerak: {format_money(price)}', reply_markup=main_menu())
+    data = await state.get_data()
+    source = data.get('source', 'Ko‘rsatilmagan')
+    oid = db.create_json_service_order(m.from_user.id, text, source)
+    if not oid:
+        return await m.answer('❌ Buyurtma yaratilmadi. Qaytadan urinib ko‘ring.')
+    await state.clear()
+    order = db.json_service_order(oid)
+    await m.answer(
+        f'✅ <b>Buyurtma qabul qilindi</b>\n\n'
+        f'🆔 Buyurtma: <b>#{oid}</b>\n'
+        f'🌐 Manba: <b>{escape(source)}</b>\n'
+        f'💰 Narx: <b>{format_money(price)}</b>\n'
+        '⏳ Admin JSONni tayyorlamoqda.',
+        parse_mode='HTML', reply_markup=main_menu())
+    uname = f'@{order["username"]}' if order['username'] else 'username yo‘q'
+    admin_text = (
+        f'📝 <b>YANGI JSON XIZMATI #{oid}</b>\n\n'
+        f'👤 {escape(order["full_name"])}\n'
+        f'🔗 {escape(uname)}\n'
+        f'🆔 <code>{order["telegram_user_id"]}</code>\n'
+        f'🌐 <b>Manba:</b> {escape(source)}\n'
+        f'💰 Narx: <b>{format_money(order["price"])}</b>\n\n'
+        f'📋 <b>Ma’lumot:</b>\n<pre>{escape(text[:2300])}</pre>')
     for aid in config.admin_ids:
         try:
             await m.bot.send_message(aid, admin_text, parse_mode='HTML', reply_markup=json_service_admin_actions(oid))
         except Exception:
             pass
-
-@router.callback_query(F.data == 'jsnoop:')
-async def noop(c: CallbackQuery):
-    await c.answer()

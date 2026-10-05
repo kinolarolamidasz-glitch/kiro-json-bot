@@ -94,9 +94,9 @@ def settings_menu():
 
 def json_source_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='🐙 GitHub', callback_data='jssource:GitHub')],
-        [InlineKeyboardButton(text='🔎 Google', callback_data='jssource:Google')],
-        [InlineKeyboardButton(text='🪪 Builder ID', callback_data='jssource:Builder ID')],
+        [InlineKeyboardButton(text='🐙 GitHub', callback_data='jssource:github')],
+        [InlineKeyboardButton(text='🔎 Google', callback_data='jssource:google')],
+        [InlineKeyboardButton(text='🪪 Builder ID', callback_data='jssource:builder_id')],
         [InlineKeyboardButton(text='❌ Bekor qilish', callback_data='fsm:cancel')],
     ])
 
@@ -126,7 +126,8 @@ def plan_admin(rows):
 
 def plan_manage(r):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='✏️ Narx',callback_data=f'planprice:{r["id"]}'),InlineKeyboardButton(text=('🔴 O‘chirish' if r['enabled'] else '🟢 Yoqish'),callback_data=f'plantoggle:{r["id"]}')],
+        [InlineKeyboardButton(text='✏️ Narx',callback_data=f'planprice:{r["id"]}'),InlineKeyboardButton(text='📝 Nomi',callback_data=f'planname:{r["id"]}')],
+        [InlineKeyboardButton(text=('🔴 O‘chirish' if r['enabled'] else '🟢 Yoqish'),callback_data=f'plantoggle:{r["id"]}')],
         [InlineKeyboardButton(text='🗑 O‘chirish',callback_data=f'plandelete:{r["id"]}')],[InlineKeyboardButton(text='🔙 Tariflar',callback_data='adm:plans')]
     ])
 

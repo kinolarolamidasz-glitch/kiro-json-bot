@@ -27,6 +27,7 @@ class AdminStates(StatesGroup):
     add_plan_name = State()
     add_plan_price = State()
     edit_plan_price = State()
+    edit_plan_name = State()
     add_payment_name = State()
     add_payment_details = State()
     add_payment_note = State()

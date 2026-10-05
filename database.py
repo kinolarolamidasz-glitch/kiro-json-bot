@@ -8,7 +8,7 @@ class Database:
  def __init__(self,path=DB_PATH): self.path=str(path); self.init()
  @contextmanager
  def conn(self):
-  c=sqlite3.connect(self.path,timeout=15); c.row_factory=sqlite3.Row; c.execute('PRAGMA foreign_keys=ON'); c.execute('PRAGMA busy_timeout=15000'); c.execute('PRAGMA journal_mode=WAL'); c.execute('PRAGMA synchronous=NORMAL')
+  c=sqlite3.connect(self.path,timeout=15); c.row_factory=sqlite3.Row; c.execute('PRAGMA foreign_keys=ON'); c.execute('PRAGMA busy_timeout=15000'); c.execute('PRAGMA synchronous=NORMAL')
   try: yield c; c.commit()
   finally: c.close()
  def init(self):
@@ -57,6 +57,7 @@ class Database:
    c.execute("DELETE FROM plans WHERE name IN ('Power','Pro','Pro Max')")
    if c.execute('SELECT COUNT(*) FROM payment_methods').fetchone()[0]==0:
     for n in ('Click','Payme','Paynet','Uzum'): c.execute('INSERT INTO payment_methods(name,details,note,created_at) VALUES(?,?,?,?)',(n,'','',now()))
+   c.execute('PRAGMA journal_mode=WAL')
    c.executescript('''
    CREATE INDEX IF NOT EXISTS idx_users_tg ON users(telegram_user_id);
    CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id,id DESC);
@@ -64,6 +65,8 @@ class Database:
    CREATE INDEX IF NOT EXISTS idx_withdrawals_status ON withdrawals(status,id DESC);
    CREATE INDEX IF NOT EXISTS idx_topups_status ON balance_topups(status,id DESC);
    CREATE INDEX IF NOT EXISTS idx_json_service_status ON json_service_orders(status,id DESC);
+   CREATE INDEX IF NOT EXISTS idx_plans_enabled ON plans(enabled,id);
+   CREATE INDEX IF NOT EXISTS idx_payment_methods_enabled ON payment_methods(enabled,id);
    ''')
  def ensure_user(self,tg):
   with self.conn() as c:

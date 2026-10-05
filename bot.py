@@ -7,7 +7,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand, Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from config import load_config, Config
 from database import Database
-from keyboards import main_menu
+from keyboards import main_menu, MENU
 from membership_service import check_memberships, chat_link
 import handler_start as start
 import handler_user as user
@@ -35,14 +35,28 @@ async def main():
     async def middleware(handler, event, data):
         data['db'] = db
         data['config'] = config
+        # Reply-menu commands must work even if an earlier FSM step was abandoned.
+        if isinstance(event, Message) and event.text in MENU:
+            fsm = data.get('state')
+            if fsm is not None:
+                await fsm.clear()
+        if isinstance(event, Message) and event.text in ('📝 JSON tayyorlash', '🛒 JSON sotish', '💰 Balansim', '➕ Balans to‘ldirish', '💸 Pul chiqarish', '📦 Sotuvlarim', '📜 Tarix', '👤 Kabinet', '💳 Kartalarim', '❓ Yordam'):
+            from aiogram.fsm.context import FSMContext
+            from aiogram.fsm.storage.base import StorageKey
+            key = StorageKey(bot_id=bot.id, chat_id=event.chat.id, user_id=event.from_user.id)
+            await dp.storage.set_state(key, None)
+            await dp.storage.set_data(key, {})
         if getattr(event, 'from_user', None):
             uid = event.from_user.id
             # SQLite is synchronous; do not write last_seen on every callback.
             now_mono = time.monotonic()
             if isinstance(event, Message) and now_mono - user_touch_cache.get(uid, 0) >= USER_TOUCH_TTL:
-                db.ensure_user(event.from_user)
+                u = db.ensure_user(event.from_user)
                 user_touch_cache[uid] = now_mono
-            u = db.user(uid)
+            else:
+                u = db.user(uid)
+                if u is None:
+                    u = db.ensure_user(event.from_user)
             if u['blocked'] and event.from_user.id not in config.admin_ids:
                 if isinstance(event, CallbackQuery):
                     await event.answer('⛔ Hisobingiz bloklangan.', show_alert=True)
@@ -74,10 +88,31 @@ async def main():
                         elif isinstance(event, Message):
                             await event.answer('🔐 Avval majburiy kanal/guruh(lar)ga qo‘shiling.', reply_markup=kb)
                         return
-        return await handler(event, data)
+        try:
+            return await handler(event, data)
+        except Exception:
+            logger.exception('Unhandled bot error')
+            try:
+                if isinstance(event, CallbackQuery):
+                    await event.answer('⚠️ Xatolik yuz berdi. Qayta urinib ko‘ring.', show_alert=True)
+                elif isinstance(event, Message):
+                    await event.answer('⚠️ Xatolik yuz berdi. Qayta urinib ko‘ring.')
+            except Exception:
+                pass
 
     dp.message.middleware(middleware)
     dp.callback_query.middleware(middleware)
+    @dp.message(Command('cancel'))
+    async def cancel(m: Message, state):
+        await state.clear()
+        await m.answer('❌ Amal bekor qilindi.', reply_markup=main_menu())
+
+    @dp.callback_query(F.data == 'fsm:cancel')
+    async def cancel_callback(c: CallbackQuery, state):
+        await state.clear()
+        await c.message.answer('❌ Amal bekor qilindi.', reply_markup=main_menu())
+        await c.answer('Bekor qilindi')
+
     dp.include_router(start.router)
     dp.include_router(user.router)
     dp.include_router(json_service_order.router)
@@ -101,16 +136,9 @@ async def main():
             return await c.answer('✅ Tasdiqlandi')
         await c.answer('❌ Hali barcha kanal/guruhlarga obuna bo‘lmagansiz.', show_alert=True)
 
-    @dp.message(Command('cancel'))
-    async def cancel(m: Message, state):
-        await state.clear()
-        await m.answer('❌ Amal bekor qilindi.', reply_markup=main_menu())
-
-    @dp.callback_query(F.data == 'fsm:cancel')
-    async def cancel_callback(c: CallbackQuery, state):
-        await state.clear()
-        await c.message.answer('❌ Amal bekor qilindi.', reply_markup=main_menu())
-        await c.answer('Bekor qilindi')
+    @dp.callback_query()
+    async def unknown_button(c: CallbackQuery):
+        await c.answer('Tugma eskirgan. /start ni bosib qayta urinib ko‘ring.', show_alert=True)
 
     await bot.set_my_commands([
         BotCommand(command='start', description='Botni boshlash'),

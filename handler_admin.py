@@ -199,6 +199,21 @@ async def plan_price_edit(m:Message,state:FSMContext,db:Database,config:Config):
  try:p=int(m.text.replace(' ',''))
  except:return await m.answer('❌ Son kiriting.')
  d=await state.get_data();db.update_plan(d['edit_plan'],price=p);await state.clear();await m.answer('✅ Narx yangilandi.',reply_markup=admin_menu())
+@router.callback_query(F.data.startswith('planname:'))
+async def planname(c:CallbackQuery,state:FSMContext,config:Config):
+ if not adm(c.from_user.id,config):return await deny(c)
+ await state.update_data(edit_plan=int(c.data.split(':')[1]));await state.set_state(AdminStates.edit_plan_name)
+ await c.message.answer('📝 Tarifning yangi nomini yuboring.')
+ await c.answer()
+@router.message(AdminStates.edit_plan_name,F.text)
+async def plan_name_edit(m:Message,state:FSMContext,db:Database,config:Config):
+ if not adm(m.from_user.id,config):return
+ name=m.text.strip()[:50]
+ if len(name)<2:return await m.answer('❌ Nom juda qisqa.')
+ d=await state.get_data()
+ try: db.update_plan(d['edit_plan'],name=name)
+ except Exception: return await m.answer('❌ Bu nom allaqachon mavjud.')
+ await state.clear();await m.answer('✅ Tarif nomi yangilandi.',reply_markup=admin_menu())
 @router.callback_query(F.data.startswith('plantoggle:'))
 async def plantoggle(c:CallbackQuery,db:Database,config:Config):
  if not adm(c.from_user.id,config):return await deny(c)

@@ -25,7 +25,7 @@ async def start(message: Message, db: Database):
     u = db.ensure_user(message.from_user)
     if u['blocked']:
         return await message.answer('⛔ Sizning hisobingiz bloklangan.')
-    if not await is_member(message, db):
+    if db.setting('membership_required', '0') == '1' and not await is_member(message, db):
         chats = db.required_chats(True)
         names='\n'.join(f'• {c["title"]}' for c in chats)
         return await message.answer(
