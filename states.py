@@ -35,6 +35,8 @@ class AdminStates(StatesGroup):
     balance_user = State()
     balance_amount = State()
     balance_note = State()
+    user_manage_id = State()
+    user_block_duration = State()
     broadcast = State()
     add_balance_card_label = State()
     add_balance_card_number = State()

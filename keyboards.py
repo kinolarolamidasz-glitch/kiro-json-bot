@@ -1,4 +1,5 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from payment_service import format_money
 
 MENU = ['🛒 JSON sotish','📝 JSON tayyorlash','💰 Balansim','➕ Balans to‘ldirish','💸 Pul chiqarish','📦 Sotuvlarim','📜 Tarix','👤 Kabinet','💳 Kartalarim','❓ Yordam']
 
@@ -50,6 +51,33 @@ def admin_menu():
         [InlineKeyboardButton(text='📜 Tranzaksiyalar',callback_data='adm:transactions'),InlineKeyboardButton(text='📢 Kanallar',callback_data='adm:channels')],
         [InlineKeyboardButton(text='🔐 Majburiy obuna',callback_data='adm:membership'),InlineKeyboardButton(text='📣 Hammaga xabar',callback_data='adm:broadcast')],
         [InlineKeyboardButton(text='⚙️ Sozlamalar',callback_data='adm:settings'),InlineKeyboardButton(text='🗄 Backup',callback_data='adm:backup')]
+    ])
+
+def user_admin(rows):
+    buttons=[]
+    for r in rows:
+        status = '🔴' if r['blocked'] else '🟢'
+        name = (r['username'] or r['full_name'] or str(r['telegram_user_id']))[:24]
+        buttons.append([InlineKeyboardButton(text=f'{status} {name} • {format_money(r["balance"])}', callback_data=f'useradm:{r["telegram_user_id"]}')])
+    buttons.append([InlineKeyboardButton(text='🔎 ID bo‘yicha topish', callback_data='usersearch')])
+    buttons.append([InlineKeyboardButton(text='🔙 Admin panel', callback_data='adm:home')])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def user_manage(r):
+    blocked = bool(r['blocked'])
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='➕ Balans +', callback_data=f'userplus:{r["telegram_user_id"]}'), InlineKeyboardButton(text='➖ Balans −', callback_data=f'userminus:{r["telegram_user_id"]}')],
+        [InlineKeyboardButton(text='💰 Balansni 0 qilish', callback_data=f'userzero:{r["telegram_user_id"]}')],
+        [InlineKeyboardButton(text='🔴 Bloklash', callback_data=f'userblock:{r["telegram_user_id"]}'), InlineKeyboardButton(text='🟢 Blokdan ochish', callback_data=f'userunblock:{r["telegram_user_id"]}')],
+        [InlineKeyboardButton(text='🔙 Foydalanuvchilar', callback_data='adm:users')]
+    ])
+
+def block_duration_menu(tg):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='⏱ 1 soat', callback_data=f'blockdur:{tg}:1h'), InlineKeyboardButton(text='⏱ 6 soat', callback_data=f'blockdur:{tg}:6h')],
+        [InlineKeyboardButton(text='📅 1 kun', callback_data=f'blockdur:{tg}:1d'), InlineKeyboardButton(text='📅 7 kun', callback_data=f'blockdur:{tg}:7d')],
+        [InlineKeyboardButton(text='🔒 Doimiy', callback_data=f'blockdur:{tg}:perm')],
+        [InlineKeyboardButton(text='🔙 Orqaga', callback_data=f'useradm:{tg}')]
     ])
 
 def settings_menu():

@@ -31,6 +31,7 @@ async def main():
         data['config'] = config
         if getattr(event, 'from_user', None):
             u = db.ensure_user(event.from_user)
+            u = db.user(event.from_user.id)
             if u['blocked'] and event.from_user.id not in config.admin_ids:
                 if isinstance(event, CallbackQuery):
                     await event.answer('⛔ Hisobingiz bloklangan.', show_alert=True)

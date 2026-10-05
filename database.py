@@ -14,7 +14,7 @@ class Database:
  def init(self):
   with self.conn() as c:
    c.executescript('''
-   CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT,telegram_user_id INTEGER UNIQUE NOT NULL,username TEXT,full_name TEXT NOT NULL,created_at TEXT NOT NULL,last_seen TEXT NOT NULL,balance INTEGER NOT NULL DEFAULT 0,blocked INTEGER NOT NULL DEFAULT 0);
+   CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT,telegram_user_id INTEGER UNIQUE NOT NULL,username TEXT,full_name TEXT NOT NULL,created_at TEXT NOT NULL,last_seen TEXT NOT NULL,balance INTEGER NOT NULL DEFAULT 0,blocked INTEGER NOT NULL DEFAULT 0,blocked_until TEXT);
    CREATE TABLE IF NOT EXISTS json_submissions(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,plan TEXT NOT NULL,json_text TEXT NOT NULL,price INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'pending',reject_reason TEXT,created_at TEXT NOT NULL,reviewed_at TEXT,FOREIGN KEY(user_id) REFERENCES users(id));
    CREATE TABLE IF NOT EXISTS withdrawals(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,amount INTEGER NOT NULL,payment_method TEXT NOT NULL,recipient TEXT NOT NULL,note TEXT,status TEXT NOT NULL DEFAULT 'pending',requested_at TEXT NOT NULL,paid_at TEXT,payment_id TEXT,reject_reason TEXT,paid_by_id INTEGER,paid_by_username TEXT,FOREIGN KEY(user_id) REFERENCES users(id));
    CREATE TABLE IF NOT EXISTS payment_methods(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT UNIQUE NOT NULL,details TEXT NOT NULL DEFAULT '',note TEXT NOT NULL DEFAULT '',enabled INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL);
@@ -29,7 +29,7 @@ class Database:
    CREATE TABLE IF NOT EXISTS json_service_orders(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,price INTEGER NOT NULL,request_text TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',created_at TEXT NOT NULL,completed_at TEXT,reject_reason TEXT,admin_id INTEGER,FOREIGN KEY(user_id) REFERENCES users(id));
    ''')
    # migrations for older DBs
-   for col,typ,default in [('blocked','INTEGER NOT NULL DEFAULT 0','0')]:
+   for col,typ,default in [('blocked','INTEGER NOT NULL DEFAULT 0','0'),('blocked_until','TEXT',None)]:
     try:c.execute(f'ALTER TABLE users ADD COLUMN {col} {typ}')
     except sqlite3.OperationalError:pass
    for col,typ,default in [('note',"TEXT NOT NULL DEFAULT ''",None),('paid_by_id','INTEGER',None),('paid_by_username',"TEXT",None)]:
@@ -59,7 +59,15 @@ class Database:
    c.execute('''INSERT INTO users(telegram_user_id,username,full_name,created_at,last_seen) VALUES(?,?,?,?,?) ON CONFLICT(telegram_user_id) DO UPDATE SET username=excluded.username,full_name=excluded.full_name,last_seen=excluded.last_seen''',(tg.id,tg.username,tg.full_name,now(),now()))
    return c.execute('SELECT * FROM users WHERE telegram_user_id=?',(tg.id,)).fetchone()
  def user(self,tg):
-  with self.conn() as c:return c.execute('SELECT * FROM users WHERE telegram_user_id=?',(tg,)).fetchone()
+  with self.conn() as c:
+   u=c.execute('SELECT * FROM users WHERE telegram_user_id=?',(tg,)).fetchone()
+   if u and u['blocked'] and u['blocked_until']:
+    try:
+     if datetime.fromisoformat(u['blocked_until']) <= datetime.now(timezone.utc):
+      c.execute("UPDATE users SET blocked=0,blocked_until=NULL WHERE telegram_user_id=?",(tg,))
+      u=c.execute('SELECT * FROM users WHERE telegram_user_id=?',(tg,)).fetchone()
+    except Exception: pass
+   return u
  def setting(self,k,d=''):
   with self.conn() as c:
    r=c.execute('SELECT value FROM settings WHERE key=?',(k,)).fetchone();return r['value'] if r else d
@@ -265,8 +273,15 @@ class Database:
 
  def all_users(self,limit=50,offset=0):
   with self.conn() as c:return c.execute('SELECT * FROM users ORDER BY id DESC LIMIT ? OFFSET ?',(limit,offset)).fetchall()
- def set_block(self,tg,blocked):
-  with self.conn() as c:c.execute('UPDATE users SET blocked=? WHERE telegram_user_id=?',(int(blocked),tg))
+ def set_block(self,tg,blocked,until=None):
+  with self.conn() as c:
+   cur=c.execute('UPDATE users SET blocked=?,blocked_until=? WHERE telegram_user_id=?',(int(blocked),until,tg))
+   return cur.rowcount>0
+ def user_status(self,tg):
+  return self.user(tg)
+ def clear_expired_blocks(self):
+  with self.conn() as c:
+   c.execute("UPDATE users SET blocked=0,blocked_until=NULL WHERE blocked=1 AND blocked_until IS NOT NULL AND blocked_until<=?",(now(),))
  def adjust_balance(self,tg,amount,note):
   with self.conn() as c:
    u=c.execute('SELECT * FROM users WHERE telegram_user_id=?',(tg,)).fetchone()

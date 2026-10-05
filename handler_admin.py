@@ -1,6 +1,7 @@
 from aiogram import Router,F
 from aiogram.filters import Command
 from aiogram.types import Message,CallbackQuery,BufferedInputFile
+from io import BytesIO
 from html import escape
 from aiogram.fsm.context import FSMContext
 from database import Database
@@ -12,7 +13,7 @@ from json_service import html_code_block
 from backup_service import make_backup
 router=Router()
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import asyncio
 from membership_service import chat_link
 
@@ -260,11 +261,106 @@ async def paydelete(c:CallbackQuery,db:Database,config:Config):
 @router.callback_query(F.data=='adm:users')
 async def users(c:CallbackQuery,db:Database,config:Config):
  if not adm(c.from_user.id,config):return await deny(c)
- rows=db.all_users();await c.message.answer('👥 <b>USERS</b>\n\n'+('\n'.join(f'🆔 {r["telegram_user_id"]} | @{r["username"] or "yo‘q"} | 💰 {format_money(r["balance"])} | {"🔴" if r["blocked"] else "🟢"}' for r in rows) if rows else 'User yo‘q.'),parse_mode='HTML',reply_markup=back_admin());await c.answer()
+ rows=db.all_users(50)
+ text='👥 <b>FOYDALANUVCHILAR</b>\n\n🟢 faol • 🔴 bloklangan\n' + (f'Jami ko‘rsatilmoqda: {len(rows)} ta' if rows else 'Hali foydalanuvchi yo‘q.')
+ await c.message.answer(text,parse_mode='HTML',reply_markup=user_admin(rows));await c.answer()
+
+@router.callback_query(F.data.startswith('useradm:'))
+async def useradm(c:CallbackQuery,db:Database,config:Config):
+ if not adm(c.from_user.id,config):return await deny(c)
+ tg=int(c.data.split(':')[1]);r=db.user(tg)
+ if not r:return await c.answer('Foydalanuvchi topilmadi.',show_alert=True)
+ status='🔴 BLOKLANGAN' if r['blocked'] else '🟢 FAOL'
+ until=r['blocked_until'] if r['blocked_until'] else ('doimiy' if r['blocked'] else '-')
+ text=(f'👤 <b>FOYDALANUVCHI</b>\n\n🆔 <code>{tg}</code>\n📛 {escape(r["full_name"])}\n🔗 @{escape(r["username"] or "yo‘q")}\n💰 Balans: <b>{format_money(r["balance"])}</b>\n📌 Holat: {status}\n⏳ Blok muddati: {escape(until)}')
+ await c.message.answer(text,parse_mode='HTML',reply_markup=user_manage(r));await c.answer()
+
+@router.callback_query(F.data=='usersearch')
+async def usersearch(c:CallbackQuery,state:FSMContext,config:Config):
+ if not adm(c.from_user.id,config):return await deny(c)
+ await state.set_state(AdminStates.user_manage_id)
+ await c.message.answer('🔎 Foydalanuvchining Telegram ID raqamini yuboring.')
+ await c.answer()
+
+@router.message(AdminStates.user_manage_id,F.text)
+async def usersearch_id(m:Message,state:FSMContext,db:Database,config:Config):
+ if not adm(m.from_user.id,config):return
+ try: tg=int(m.text.strip())
+ except ValueError:return await m.answer('❌ ID faqat raqam bo‘lishi kerak.')
+ r=db.user(tg)
+ if not r:return await m.answer('❌ Bunday foydalanuvchi topilmadi.')
+ await state.clear()
+ await m.answer(f'👤 {escape(r["full_name"])}\n🆔 <code>{tg}</code>\n💰 Balans: <b>{format_money(r["balance"])}</b>',parse_mode='HTML',reply_markup=user_manage(r))
+
+async def _ask_balance(c:CallbackQuery,state:FSMContext,config:Config,tg:int,mode:str):
+ if not adm(c.from_user.id,config):return await deny(c)
+ await state.update_data(balance_user=tg,balance_mode=mode)
+ await state.set_state(AdminStates.balance_amount)
+ sign='qo‘shiladigan' if mode=='plus' else 'ayiriladigan'
+ await c.message.answer(f'💰 {tg} uchun {sign} summani yuboring.\nMasalan: <code>50000</code>',parse_mode='HTML')
+ await c.answer()
+
+@router.callback_query(F.data.startswith('userplus:'))
+async def userplus(c:CallbackQuery,state:FSMContext,config:Config):
+ await _ask_balance(c,state,config,int(c.data.split(':')[1]),'plus')
+
+@router.callback_query(F.data.startswith('userminus:'))
+async def userminus(c:CallbackQuery,state:FSMContext,config:Config):
+ await _ask_balance(c,state,config,int(c.data.split(':')[1]),'minus')
+
+@router.message(AdminStates.balance_amount,F.text)
+async def balance_amount(m:Message,state:FSMContext,db:Database,config:Config):
+ if not adm(m.from_user.id,config):return
+ try: amount=int(m.text.replace(' ','').replace(',','').replace('_',''))
+ except ValueError:return await m.answer('❌ Faqat musbat summa yuboring.')
+ if amount<=0:return await m.answer('❌ Summa 0 dan katta bo‘lsin.')
+ d=await state.get_data();tg=int(d['balance_user']);delta=amount if d['balance_mode']=='plus' else -amount
+ r=db.adjust_balance(tg,delta,'Admin tomonidan balans boshqaruvi')
+ if r is None:return await m.answer('❌ Foydalanuvchi topilmadi yoki balansni manfiy qilish mumkin emas.')
+ await state.clear()
+ await m.answer(f'✅ Balans yangilandi.\n🆔 <code>{tg}</code>\n💰 Yangi balans: <b>{format_money(r)}</b>',parse_mode='HTML',reply_markup=admin_menu())
+ try: await m.bot.send_message(tg,f'💰 Balansingiz admin tomonidan yangilandi.\nYangi balans: {format_money(r)}')
+ except Exception: pass
+
+@router.callback_query(F.data.startswith('userzero:'))
+async def userzero(c:CallbackQuery,db:Database,config:Config):
+ if not adm(c.from_user.id,config):return await deny(c)
+ tg=int(c.data.split(':')[1]);r=db.user(tg)
+ if not r:return await c.answer('Topilmadi.',show_alert=True)
+ if r['balance']:
+  db.adjust_balance(tg,-r['balance'],'Admin balansni 0 qildi')
+ await c.message.answer('✅ Balans 0 qilindi.',reply_markup=user_manage(db.user(tg)));await c.answer()
+
+@router.callback_query(F.data.startswith('userblock:'))
+async def userblock(c:CallbackQuery,config:Config):
+ if not adm(c.from_user.id,config):return await deny(c)
+ tg=int(c.data.split(':')[1]);await c.message.answer('🔒 Bloklash muddatini tanlang:',reply_markup=block_duration_menu(tg));await c.answer()
+
+@router.callback_query(F.data.startswith('blockdur:'))
+async def blockdur(c:CallbackQuery,db:Database,config:Config):
+ if not adm(c.from_user.id,config):return await deny(c)
+ _,tg,kind=c.data.split(':');tg=int(tg);until=None
+ if kind!='perm':
+  hours={'1h':1,'6h':6,'1d':24,'7d':168}[kind]
+  until=(datetime.now(timezone.utc)+timedelta(hours=hours)).isoformat(timespec='seconds')
+ db.set_block(tg,True,until)
+ r=db.user(tg)
+ await c.message.answer(f'🔒 Foydalanuvchi bloklandi.\n⏳ Muddat: {"doimiy" if not until else until}',reply_markup=user_manage(r));await c.answer('Bloklandi')
+ try: await c.bot.send_message(tg,'⛔ Hisobingiz vaqtincha bloklandi. Muddat tugagach avtomatik ochiladi.' if until else '⛔ Hisobingiz bloklandi.')
+ except Exception: pass
+
+@router.callback_query(F.data.startswith('userunblock:'))
+async def userunblock(c:CallbackQuery,db:Database,config:Config):
+ if not adm(c.from_user.id,config):return await deny(c)
+ tg=int(c.data.split(':')[1]);db.set_block(tg,False,None);r=db.user(tg)
+ await c.message.answer('🟢 Foydalanuvchi blokdan ochildi.',reply_markup=user_manage(r));await c.answer('Ochildi')
+ try: await c.bot.send_message(tg,'🟢 Hisobingiz blokdan ochildi. Botdan foydalanishingiz mumkin.')
+ except Exception: pass
+
 @router.callback_query(F.data=='adm:balances')
 async def balances(c:CallbackQuery,db:Database,config:Config):
  if not adm(c.from_user.id,config):return await deny(c)
- rows=db.all_users();await c.message.answer('\n'.join(f'🆔 {r["telegram_user_id"]} | 💰 {format_money(r["balance"])}' for r in rows) or 'Bo‘sh.',reply_markup=back_admin());await c.answer()
+ rows=db.all_users();await c.message.answer('\n'.join(f'🆔 {r["telegram_user_id"]} | 💰 {format_money(r["balance"])}' for r in rows) or 'Bo‘sh.',reply_markup=user_admin(rows));await c.answer()
 @router.callback_query(F.data=='adm:transactions')
 async def transactions(c:CallbackQuery,db:Database,config:Config):
  if not adm(c.from_user.id,config):return await deny(c)
@@ -485,7 +581,7 @@ async def jsdeliver(c:CallbackQuery,state:FSMContext,db:Database,config:Config):
  if not o or o['status']!='pending':return await c.answer('Buyurtma topilmadi yoki yakunlangan.',show_alert=True)
  await state.update_data(deliver_json_service=oid)
  await state.set_state(AdminStates.deliver_json_service)
- await c.message.answer(f'📤 <b>#{oid}</b> uchun tayyorlangan <code>.json</code> faylni yuboring.',parse_mode='HTML')
+ await c.message.answer(f'📤 <b>#{oid}</b> uchun tayyorlangan JSONni yuboring.\n\nQabul qilinadi: <code>.json</code> yoki <code>.txt</code>.\nBot JSONni tekshiradi, chiroyli 2-space formatga keltiradi va foydalanuvchiga <b>.txt</b> ko‘rinishida yuboradi.',parse_mode='HTML')
  await c.answer()
 
 @router.message(AdminStates.deliver_json_service,F.document)
@@ -495,12 +591,19 @@ async def jsdeliver_file(m:Message,state:FSMContext,db:Database,config:Config):
  if not o or o['status']!='pending':
   await state.clear();return await m.answer('❌ Buyurtma topilmadi yoki allaqachon yakunlangan.')
  name=(m.document.file_name or '').lower()
- if not name.endswith('.json'):
-  return await m.answer('❌ Faqat .json fayl yuboring.')
+ if not (name.endswith('.json') or name.endswith('.txt')):
+  return await m.answer('❌ Faqat .json yoki .txt fayl yuboring.')
  try:
-  await m.bot.send_document(o['telegram_user_id'],m.document.file_id,
-    caption=f'✅ <b>JSON #{oid} tayyor!</b>\n\n📦 Fayl tayyorlandi. Rahmat.',
-    parse_mode='HTML')
+  tg_file=await m.bot.get_file(m.document.file_id)
+  buf=BytesIO()
+  await m.bot.download_file(tg_file.file_path,destination=buf)
+  raw=buf.getvalue().decode('utf-8-sig')
+  formatted=__import__('json_service').validate_json(raw)
+  await m.bot.send_document(o['telegram_user_id'],BufferedInputFile(formatted.encode('utf-8'),filename=f'json_{oid}.txt'),caption=f'✅ <b>JSON #{oid} tayyor!</b>\n\n📄 Toza, tekshirilgan JSON <b>.txt</b> formatida yuborildi.',parse_mode='HTML')
+ except UnicodeDecodeError:
+  return await m.answer('❌ Fayl UTF-8 formatida bo‘lishi kerak.')
+ except ValueError as e:
+  return await m.answer(f'❌ JSON sifati/xatosi: {e}')
  except Exception:
   return await m.answer('❌ Foydalanuvchiga yuborib bo‘lmadi. Buyurtma yopilmadi.')
  if not db.complete_json_service_order(oid,m.from_user.id):
@@ -511,7 +614,7 @@ async def jsdeliver_file(m:Message,state:FSMContext,db:Database,config:Config):
 @router.message(AdminStates.deliver_json_service)
 async def jsdeliver_wrong(m:Message,config:Config):
  if not adm(m.from_user.id,config):return
- await m.answer('❌ Tayyor JSON faylini .json hujjat ko‘rinishida yuboring.')
+ await m.answer('❌ Tayyor JSONni .json yoki .txt hujjat ko‘rinishida yuboring.')
 
 @router.callback_query(F.data.startswith('jsreject:'))
 async def jsreject(c:CallbackQuery,state:FSMContext,config:Config):
