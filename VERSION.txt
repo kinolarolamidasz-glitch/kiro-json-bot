@@ -1,0 +1,1 @@
+Kiro Savdo Bot MAX v4 — clean admin controlled tariffs, JSON service source selection, text input, stable flat build

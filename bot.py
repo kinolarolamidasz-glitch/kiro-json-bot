@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -26,12 +27,22 @@ async def main():
     bot = Bot(config.bot_token)
     dp = Dispatcher(storage=MemoryStorage())
 
+    membership_cache = {}
+    user_touch_cache = {}
+    MEMBERSHIP_TTL = 60.0
+    USER_TOUCH_TTL = 20.0
+
     async def middleware(handler, event, data):
         data['db'] = db
         data['config'] = config
         if getattr(event, 'from_user', None):
-            u = db.ensure_user(event.from_user)
-            u = db.user(event.from_user.id)
+            uid = event.from_user.id
+            # SQLite is synchronous; do not write last_seen on every callback.
+            now_mono = time.monotonic()
+            if isinstance(event, Message) and now_mono - user_touch_cache.get(uid, 0) >= USER_TOUCH_TTL:
+                db.ensure_user(event.from_user)
+                user_touch_cache[uid] = now_mono
+            u = db.user(uid)
             if u['blocked'] and event.from_user.id not in config.admin_ids:
                 if isinstance(event, CallbackQuery):
                     await event.answer('⛔ Hisobingiz bloklangan.', show_alert=True)
@@ -43,7 +54,12 @@ async def main():
             is_start = isinstance(event, Message) and bool(event.text) and event.text.split()[0].split('@')[0] == '/start'
             if event.from_user.id not in config.admin_ids and not is_membership_check and not is_start:
                 if db.setting('membership_required', '0') == '1':
-                    ok, missing = await check_memberships(bot, db, event.from_user.id)
+                    cached = membership_cache.get(uid)
+                    if cached and now_mono - cached[0] < MEMBERSHIP_TTL:
+                        ok, missing = cached[1], cached[2]
+                    else:
+                        ok, missing = await check_memberships(bot, db, uid)
+                        membership_cache[uid] = (now_mono, ok, missing)
                     if not ok:
                         buttons=[]
                         for chat in db.required_chats(True):
@@ -79,6 +95,7 @@ async def main():
             await c.message.answer('✅ Majburiy obuna o‘chiq. Botdan foydalanishingiz mumkin.', reply_markup=main_menu())
             return await c.answer('✅ Tasdiqlandi')
         ok, missing = await check_memberships(c.bot, db, c.from_user.id)
+        membership_cache.pop(c.from_user.id, None)
         if ok:
             await c.message.answer('✅ Obuna tasdiqlandi. Endi botdan foydalanishingiz mumkin.', reply_markup=main_menu())
             return await c.answer('✅ Tasdiqlandi')

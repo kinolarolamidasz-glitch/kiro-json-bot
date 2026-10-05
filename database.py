@@ -8,7 +8,7 @@ class Database:
  def __init__(self,path=DB_PATH): self.path=str(path); self.init()
  @contextmanager
  def conn(self):
-  c=sqlite3.connect(self.path,timeout=15); c.row_factory=sqlite3.Row; c.execute('PRAGMA foreign_keys=ON'); c.execute('PRAGMA busy_timeout=15000')
+  c=sqlite3.connect(self.path,timeout=15); c.row_factory=sqlite3.Row; c.execute('PRAGMA foreign_keys=ON'); c.execute('PRAGMA busy_timeout=15000'); c.execute('PRAGMA journal_mode=WAL'); c.execute('PRAGMA synchronous=NORMAL')
   try: yield c; c.commit()
   finally: c.close()
  def init(self):
@@ -41,6 +41,8 @@ class Database:
    for col,typ in [('reviewed_by_id','INTEGER'),('reviewed_by_username','TEXT')]:
     try:c.execute(f'ALTER TABLE subscriptions ADD COLUMN {col} {typ}')
     except sqlite3.OperationalError:pass
+   try:c.execute("ALTER TABLE json_service_orders ADD COLUMN source TEXT NOT NULL DEFAULT 'Ko‘rsatilmagan'")
+   except sqlite3.OperationalError:pass
    defaults={'min_withdrawal':'10000','help_text':'Yordam uchun admin bilan bog‘laning.','admin_username':'','membership_required':'0','official_channel_id':'','official_channel_link':'','payment_channel_id':'','json_service_price':'20000'}
    for k,v in defaults.items(): c.execute('INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)',(k,v))
    # Migrate the old single-channel mandatory subscription setting into the new multi-chat table.
@@ -50,10 +52,19 @@ class Database:
     cid=old_chat['value'].strip()
     link=(old_link['value'].strip() if old_link else '')
     c.execute('INSERT OR IGNORE INTO required_chats(chat_id,title,link,enabled,created_at) VALUES(?,?,?,?,?)',(cid,'Rasmiy kanal/guruh',link,1,now()))
-   if c.execute('SELECT COUNT(*) FROM plans').fetchone()[0]==0:
-    for n,p in [('Power',20000),('Pro',50000),('Pro Max',100000)]: c.execute('INSERT INTO plans(name,price,created_at,updated_at) VALUES(?,?,?,?)',(n,p,now(),now()))
+   # JSON tariffs are fully admin-controlled; no default Kiro/Power/Pro plans are created.
+   # Remove legacy auto-created defaults so the admin starts from a clean tariff list.
+   c.execute("DELETE FROM plans WHERE name IN ('Power','Pro','Pro Max')")
    if c.execute('SELECT COUNT(*) FROM payment_methods').fetchone()[0]==0:
     for n in ('Click','Payme','Paynet','Uzum'): c.execute('INSERT INTO payment_methods(name,details,note,created_at) VALUES(?,?,?,?)',(n,'','',now()))
+   c.executescript('''
+   CREATE INDEX IF NOT EXISTS idx_users_tg ON users(telegram_user_id);
+   CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id,id DESC);
+   CREATE INDEX IF NOT EXISTS idx_json_submissions_status ON json_submissions(status,id DESC);
+   CREATE INDEX IF NOT EXISTS idx_withdrawals_status ON withdrawals(status,id DESC);
+   CREATE INDEX IF NOT EXISTS idx_topups_status ON balance_topups(status,id DESC);
+   CREATE INDEX IF NOT EXISTS idx_json_service_status ON json_service_orders(status,id DESC);
+   ''')
  def ensure_user(self,tg):
   with self.conn() as c:
    c.execute('''INSERT INTO users(telegram_user_id,username,full_name,created_at,last_seen) VALUES(?,?,?,?,?) ON CONFLICT(telegram_user_id) DO UPDATE SET username=excluded.username,full_name=excluded.full_name,last_seen=excluded.last_seen''',(tg.id,tg.username,tg.full_name,now(),now()))
@@ -217,12 +228,12 @@ class Database:
  def json_service_price(self):
   try:return max(0,int(self.setting('json_service_price','20000')))
   except ValueError:return 20000
- def create_json_service_order(self,tg,request_text):
+ def create_json_service_order(self,tg,request_text,source='Ko‘rsatilmagan'):
   with self.conn() as c:
    u=c.execute('SELECT * FROM users WHERE telegram_user_id=?',(tg,)).fetchone()
    price=self.json_service_price()
    if not u or price<=0 or u['balance']<price:return None
-   cur=c.execute('INSERT INTO json_service_orders(user_id,price,request_text,created_at) VALUES(?,?,?,?)',(u['id'],price,request_text[:12000],now()))
+   cur=c.execute('INSERT INTO json_service_orders(user_id,price,request_text,source,created_at) VALUES(?,?,?,?,?)',(u['id'],price,request_text[:12000],source[:40],now()))
    oid=cur.lastrowid
    c.execute('UPDATE users SET balance=balance-? WHERE id=? AND balance>=?',(price,u['id'],price))
    if c.execute('SELECT changes()').fetchone()[0]!=1:

@@ -552,7 +552,7 @@ async def jsonservice_admin(c:CallbackQuery,db:Database,config:Config):
   uname=f'@{o["username"]}' if o['username'] else 'username yo‘q'
   body=(f'📝 <b>#{o["id"]}</b>\n👤 {escape(o["full_name"])}\n🔗 {escape(uname)}\n'
         f'🆔 <code>{o["telegram_user_id"]}</code>\n💰 {format_money(o["price"])}\n'
-        f'🕐 {escape(o["created_at"])}\n\n📋 <b>Ma’lumot:</b>\n<pre>{escape(o["request_text"])}</pre>')
+        f'🕐 {escape(o["created_at"])}\n🌐 <b>Manba:</b> {escape(o["source"] if "source" in o.keys() else "Ko‘rsatilmagan")}\n\n📋 <b>Ma’lumot:</b>\n<pre>{escape(o["request_text"])}</pre>')
   await c.message.answer(body,parse_mode='HTML',reply_markup=json_service_admin_actions(o['id']))
  await c.answer()
 
@@ -584,6 +584,24 @@ async def jsdeliver(c:CallbackQuery,state:FSMContext,db:Database,config:Config):
  await c.message.answer(f'📤 <b>#{oid}</b> uchun tayyorlangan JSONni yuboring.\n\nQabul qilinadi: <code>.json</code> yoki <code>.txt</code>.\nBot JSONni tekshiradi, chiroyli 2-space formatga keltiradi va foydalanuvchiga <b>.txt</b> ko‘rinishida yuboradi.',parse_mode='HTML')
  await c.answer()
 
+@router.message(AdminStates.deliver_json_service,F.text)
+async def jsdeliver_text(m:Message,state:FSMContext,db:Database,config:Config):
+  if not adm(m.from_user.id,config): return
+  d=await state.get_data(); oid=int(d['deliver_json_service']); o=db.json_service_order(oid)
+  if not o or o['status']!='pending':
+   await state.clear(); return await m.answer('❌ Buyurtma topilmadi yoki allaqachon yakunlangan.')
+  try:
+   from json_service import validate_json
+   formatted=validate_json(m.text)
+   await m.bot.send_document(o['telegram_user_id'],BufferedInputFile(formatted.encode('utf-8'),filename=f'json_{oid}.txt'),caption=f'✅ <b>JSON #{oid} tayyor!</b>\n\n📄 Toza, tekshirilgan JSON <b>.txt</b> formatida yuborildi.',parse_mode='HTML')
+  except ValueError as e:
+   return await m.answer(f'❌ JSON sifati/xatosi: {e}')
+  except Exception:
+   return await m.answer('❌ Foydalanuvchiga yuborib bo‘lmadi. Buyurtma yopilmadi.')
+  if not db.complete_json_service_order(oid,m.from_user.id):
+   return await m.answer('⚠️ Fayl yuborildi, lekin buyurtma holatini yangilashda muammo bo‘ldi.')
+  await state.clear(); await m.answer(f'✅ JSON #{oid} foydalanuvchiga yuborildi va buyurtma yakunlandi.',reply_markup=admin_menu())
+
 @router.message(AdminStates.deliver_json_service,F.document)
 async def jsdeliver_file(m:Message,state:FSMContext,db:Database,config:Config):
  if not adm(m.from_user.id,config):return
@@ -614,7 +632,7 @@ async def jsdeliver_file(m:Message,state:FSMContext,db:Database,config:Config):
 @router.message(AdminStates.deliver_json_service)
 async def jsdeliver_wrong(m:Message,config:Config):
  if not adm(m.from_user.id,config):return
- await m.answer('❌ Tayyor JSONni .json yoki .txt hujjat ko‘rinishida yuboring.')
+ await m.answer('❌ Tayyor JSONni oddiy TEXT yoki .json/.txt hujjat ko‘rinishida yuboring.')
 
 @router.callback_query(F.data.startswith('jsreject:'))
 async def jsreject(c:CallbackQuery,state:FSMContext,config:Config):

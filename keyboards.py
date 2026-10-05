@@ -91,6 +91,15 @@ def settings_menu():
     ])
 
 
+
+def json_source_menu():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='🐙 GitHub', callback_data='jssource:GitHub')],
+        [InlineKeyboardButton(text='🔎 Google', callback_data='jssource:Google')],
+        [InlineKeyboardButton(text='🪪 Builder ID', callback_data='jssource:Builder ID')],
+        [InlineKeyboardButton(text='❌ Bekor qilish', callback_data='fsm:cancel')],
+    ])
+
 def cancel_inline():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='❌ Bekor qilish', callback_data='fsm:cancel')]])
 

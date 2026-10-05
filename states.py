@@ -14,6 +14,7 @@ class TopupStates(StatesGroup):
     waiting_proof = State()
 
 class JsonServiceStates(StatesGroup):
+    waiting_source = State()
     waiting_request = State()
 
 class CardStates(StatesGroup):
